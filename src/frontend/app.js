@@ -236,8 +236,15 @@ async function pollActiveSessions() {
         var top = card.querySelector('.card-top');
         if (top) top.insertBefore(badge, top.firstChild);
 
-        // Add animated border wrapper if not already wrapped
-        if (!parent || !parent.classList.contains('card-live-wrap')) {
+        // Add/update animated border wrapper
+        if (parent && parent.classList.contains('card-live-wrap')) {
+          // Update status class on existing wrapper
+          parent.className = 'card-live-wrap' + (a.status === 'waiting' ? ' live-waiting' : '');
+          parent.style.setProperty('--live-color', a.status === 'waiting'
+            ? 'rgba(251, 191, 36, 0.5)'
+            : 'rgba(74, 222, 128, 0.7)');
+        } else {
+          // Create new wrapper
           var wrap = document.createElement('div');
           wrap.className = 'card-live-wrap' + (a.status === 'waiting' ? ' live-waiting' : '');
           wrap.style.setProperty('--live-color', a.status === 'waiting'
@@ -715,6 +722,11 @@ function render() {
 
   if (currentView === 'analytics') {
     renderAnalytics(content);
+    return;
+  }
+
+  if (currentView === 'running') {
+    renderRunning(content);
     return;
   }
 
@@ -1425,6 +1437,64 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 });
+
+// ── Running Sessions View ──────────────────────────────────────
+
+function renderRunning(container) {
+  var activeIds = Object.keys(activeSessions);
+
+  if (activeIds.length === 0) {
+    container.innerHTML = '<div class="empty-state">No running sessions detected.<br><span style="font-size:12px;color:var(--text-muted)">Start a Claude Code or Codex session and it will appear here.</span></div>';
+    return;
+  }
+
+  var html = '<div class="running-container">';
+  html += '<h2 class="heatmap-title">Running Sessions</h2>';
+
+  activeIds.forEach(function(sid) {
+    var a = activeSessions[sid];
+    var s = allSessions.find(function(x) { return x.id === sid; });
+    var projName = s ? getProjectName(s.project) : (a.cwd ? a.cwd.split('/').pop() : 'unknown');
+    var projColor = getProjectColor(projName);
+    var statusClass = a.status === 'waiting' ? 'running-waiting' : 'running-active';
+    var uptime = a.startedAt ? formatDuration(Date.now() - a.startedAt) : '';
+
+    html += '<div class="running-card ' + statusClass + '">';
+    html += '<div class="running-card-header">';
+    html += '<span class="live-badge live-' + a.status + '">' + (a.status === 'waiting' ? 'WAITING' : 'LIVE') + '</span>';
+    html += '<span class="running-project" style="color:' + projColor + '">' + escHtml(projName) + '</span>';
+    html += '<span class="running-tool">' + escHtml(a.entrypoint || a.kind || 'claude') + '</span>';
+    html += '</div>';
+
+    // Stats row
+    html += '<div class="running-stats">';
+    html += '<div class="running-stat"><span class="running-stat-val">' + a.cpu.toFixed(1) + '%</span><span class="running-stat-label">CPU</span></div>';
+    html += '<div class="running-stat"><span class="running-stat-val">' + a.memoryMB + 'MB</span><span class="running-stat-label">Memory</span></div>';
+    html += '<div class="running-stat"><span class="running-stat-val">' + a.pid + '</span><span class="running-stat-label">PID</span></div>';
+    if (uptime) {
+      html += '<div class="running-stat"><span class="running-stat-val">' + uptime + '</span><span class="running-stat-label">Uptime</span></div>';
+    }
+    html += '</div>';
+
+    // Message preview
+    if (s && s.first_message) {
+      html += '<div class="running-msg">' + escHtml(s.first_message.slice(0, 150)) + '</div>';
+    }
+
+    // Action buttons
+    html += '<div class="running-actions">';
+    html += '<button class="launch-btn" style="background:var(--accent-green);color:#000" onclick="focusSession(\'' + sid + '\')">Focus Terminal</button>';
+    if (s) {
+      html += '<button class="launch-btn btn-secondary" onclick="var ss=allSessions.find(function(x){return x.id===\'' + sid + '\'});if(ss)openDetail(ss);">Details</button>';
+    }
+    html += '</div>';
+
+    html += '</div>';
+  });
+
+  html += '</div>';
+  container.innerHTML = html;
+}
 
 // ── Session Replay ────────────────────────────────────────────
 

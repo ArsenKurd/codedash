@@ -1582,6 +1582,53 @@ body {
     box-shadow: 0 8px 32px rgba(0,0,0,0.12);
 }
 
+/* ── Running Sessions View ──────────────────────────────────── */
+
+.running-container { padding: 20px; }
+
+.running-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 12px;
+}
+
+.running-active { border-left: 3px solid var(--accent-green); }
+.running-waiting { border-left: 3px solid #f59e0b; }
+
+.running-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.running-project { font-size: 16px; font-weight: 600; }
+.running-tool { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+
+.running-stats {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 12px;
+}
+
+.running-stat { display: flex; flex-direction: column; gap: 2px; }
+.running-stat-val { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.running-stat-label { font-size: 11px; color: var(--text-muted); }
+
+.running-msg {
+    font-size: 13px;
+    color: var(--text-secondary);
+    padding: 10px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 8px;
+    margin-bottom: 12px;
+    line-height: 1.5;
+}
+
+.running-actions { display: flex; gap: 8px; }
+
 /* ── Session Replay ─────────────────────────────────────────── */
 
 .replay-container { padding: 20px; }
