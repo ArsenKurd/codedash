@@ -10,8 +10,8 @@ function buildHTML() {
   const script = fs.readFileSync(path.join(FRONTEND_DIR, 'app.js'), 'utf8');
 
   return template
-    .replace('{{STYLES}}', styles)
-    .replace('{{SCRIPT}}', script);
+    .split('{{STYLES}}').join(styles)
+    .split('{{SCRIPT}}').join(script);
 }
 
 // Cache in production

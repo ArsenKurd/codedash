@@ -335,30 +335,16 @@ body {
 /* ── Card Checkbox (bulk select) ───────────────────────────────── */
 
 .card-checkbox {
-    position: absolute;
-    top: 10px;
-    left: -6px;
-    width: 18px;
-    height: 18px;
-    border-radius: 4px;
-    border: 2px solid var(--border);
-    background: var(--bg-secondary);
+    width: 16px;
+    height: 16px;
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s, background 0.15s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2;
+    accent-color: var(--accent-blue);
+    flex-shrink: 0;
+    display: none;
 }
 .card:hover .card-checkbox,
-.card.selected .card-checkbox,
-.select-mode .card-checkbox {
-    opacity: 1;
-}
-.card-checkbox.checked {
-    background: var(--accent-blue);
-    border-color: var(--accent-blue);
+.card.selected .card-checkbox {
+    display: inline-block;
 }
 
 /* ── Card Actions ──────────────────────────────────────────────── */
@@ -1382,4 +1368,82 @@ body {
 .launch-btn.btn-delete {
     background: var(--accent-red);
     color: #fff;
+}
+
+/* ── List view ──────────────────────────────────────────────── */
+
+.list-view {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.list-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    font-size: 13px;
+}
+
+.list-row:hover {
+    background: var(--bg-card-hover);
+}
+
+.list-row.selected {
+    border-color: var(--accent-blue);
+}
+
+.list-row.focused {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+}
+
+.list-project {
+    font-weight: 600;
+    font-size: 12px;
+    width: 100px;
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.list-msg {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+
+.list-meta {
+    color: var(--text-muted);
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.list-time {
+    color: var(--text-muted);
+    font-size: 12px;
+    flex-shrink: 0;
+    width: 60px;
+    text-align: right;
+}
+
+.grid-view {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 10px;
+}
+
+.group-body-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }

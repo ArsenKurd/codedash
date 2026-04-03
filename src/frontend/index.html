@@ -72,6 +72,9 @@
         <input type="date" class="date-input" id="dateFrom" onchange="onDateFilter()" title="From date">
         <input type="date" class="date-input" id="dateTo" onchange="onDateFilter()" title="To date">
         <button class="toolbar-btn" onclick="toggleGroup()" id="groupBtn">Group</button>
+        <button class="toolbar-btn" onclick="toggleLayout()" id="layoutBtn" title="Grid / List">
+            <svg id="layoutIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        </button>
         <button class="toolbar-btn" onclick="toggleSelectMode()" id="selectBtn">Select</button>
         <button class="toolbar-btn" onclick="refreshData()">Refresh</button>
         <span class="stats" id="stats"></span>

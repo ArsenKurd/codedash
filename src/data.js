@@ -20,18 +20,20 @@ function scanCodexSessions() {
     for (const line of lines) {
       try {
         const d = JSON.parse(line);
-        const sid = d.sessionId || d.id;
+        // Codex uses session_id, ts (seconds), text
+        const sid = d.session_id || d.sessionId || d.id;
         if (!sid) continue;
+        const ts = d.ts ? d.ts * 1000 : (d.timestamp || Date.now());
         if (!sessions.find(s => s.id === sid)) {
           sessions.push({
             id: sid,
             tool: 'codex',
             project: d.project || d.cwd || '',
             project_short: (d.project || d.cwd || '').replace(os.homedir(), '~'),
-            first_ts: d.timestamp || Date.now(),
-            last_ts: d.timestamp || Date.now(),
+            first_ts: ts,
+            last_ts: ts,
             messages: 1,
-            first_message: d.display || d.prompt || '',
+            first_message: d.text || d.display || d.prompt || '',
             has_detail: false,
             file_size: 0,
             detail_messages: 0,
@@ -40,6 +42,52 @@ function scanCodexSessions() {
       } catch {}
     }
   }
+
+  // Enrich with session files from ~/.codex/sessions/
+  const codexSessionsDir = path.join(CODEX_DIR, 'sessions');
+  if (fs.existsSync(codexSessionsDir)) {
+    try {
+      // Walk year/month/day directories
+      const files = [];
+      const walkDir = (dir) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) walkDir(full);
+          else if (entry.name.endsWith('.jsonl')) files.push(full);
+        }
+      };
+      walkDir(codexSessionsDir);
+
+      for (const f of files) {
+        const stat = fs.statSync(f);
+        // Extract session ID from filename (rollout-DATE-UUID.jsonl)
+        const basename = path.basename(f, '.jsonl');
+        const uuidMatch = basename.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
+        if (!uuidMatch) continue;
+        const sid = uuidMatch[1];
+        const existing = sessions.find(s => s.id === sid);
+        if (existing) {
+          existing.has_detail = true;
+          existing.file_size = stat.size;
+        } else {
+          sessions.push({
+            id: sid,
+            tool: 'codex',
+            project: '',
+            project_short: '',
+            first_ts: stat.mtimeMs,
+            last_ts: stat.mtimeMs,
+            messages: 0,
+            first_message: '',
+            has_detail: true,
+            file_size: stat.size,
+            detail_messages: 0,
+          });
+        }
+      }
+    } catch {}
+  }
+
   return sessions;
 }
 

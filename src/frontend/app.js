@@ -7,6 +7,7 @@ let allSessions = [];
 let filteredSessions = [];
 let currentView = 'sessions';  // sessions, projects, timeline, activity, starred
 let grouped = true;
+let layout = localStorage.getItem('codedash-layout') || 'grid'; // 'grid' or 'list'
 let searchQuery = '';
 let toolFilter = null;  // null, 'claude', 'codex'
 let tagFilter = '';
@@ -325,6 +326,42 @@ function renderCard(s, idx) {
   return html;
 }
 
+function toggleLayout() {
+  layout = layout === 'grid' ? 'list' : 'grid';
+  localStorage.setItem('codedash-layout', layout);
+  var btn = document.getElementById('layoutBtn');
+  if (btn) btn.classList.toggle('active', layout === 'list');
+  var icon = document.getElementById('layoutIcon');
+  if (icon) {
+    icon.innerHTML = layout === 'list'
+      ? '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>'
+      : '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>';
+  }
+  render();
+}
+
+function renderListCard(s, idx) {
+  var isStarred = stars.indexOf(s.id) >= 0;
+  var isSelected = selectedIds.has(s.id);
+  var isFocused = focusedIndex === idx;
+  var projName = getProjectName(s.project);
+  var projColor = getProjectColor(projName);
+
+  var classes = 'list-row';
+  if (isSelected) classes += ' selected';
+  if (isFocused) classes += ' focused';
+
+  var html = '<div class="' + classes + '" data-id="' + s.id + '" onclick="onCardClick(\'' + s.id + '\', event)">';
+  html += '<span class="tool-badge tool-' + s.tool + '">' + escHtml(s.tool) + '</span>';
+  html += '<span class="list-project" style="color:' + projColor + '">' + escHtml(projName) + '</span>';
+  html += '<span class="list-msg">' + escHtml((s.first_message || '').slice(0, 80)) + '</span>';
+  html += '<span class="list-meta">' + s.messages + ' msgs</span>';
+  html += '<span class="list-time">' + timeAgo(s.last_ts) + '</span>';
+  html += '<button class="star-btn' + (isStarred ? ' active' : '') + '" onclick="event.stopPropagation();toggleStar(\'' + s.id + '\')">&#9733;</button>';
+  html += '</div>';
+  return html;
+}
+
 function onCardClick(id, event) {
   if (selectMode) {
     toggleSelect(id, event);
@@ -384,15 +421,18 @@ function render() {
     return;
   }
 
+  var renderFn = layout === 'list' ? renderListCard : renderCard;
   if (grouped) {
-    renderGrouped(content, sessions);
+    renderGrouped(content, sessions, renderFn);
   } else {
     var idx2 = 0;
-    content.innerHTML = sessions.map(function(s) { return renderCard(s, idx2++); }).join('');
+    var wrapClass = layout === 'list' ? 'list-view' : 'grid-view';
+    content.innerHTML = '<div class="' + wrapClass + '">' + sessions.map(function(s) { return renderFn(s, idx2++); }).join('') + '</div>';
   }
 }
 
-function renderGrouped(container, sessions) {
+function renderGrouped(container, sessions, renderFn) {
+  renderFn = renderFn || renderCard;
   var groups = {};
   sessions.forEach(function(s) {
     var key = getProjectName(s.project);
@@ -415,9 +455,10 @@ function renderGrouped(container, sessions) {
     html += '<span class="group-count">' + groups[key].length + '</span>';
     html += '<span class="group-chevron">&#9660;</span>';
     html += '</div>';
-    html += '<div class="group-body">';
+    var bodyClass = layout === 'list' ? 'group-body group-body-list' : 'group-body';
+    html += '<div class="' + bodyClass + '">';
     groups[key].forEach(function(s) {
-      html += renderCard(s, globalIdx++);
+      html += renderFn(s, globalIdx++);
     });
     html += '</div></div>';
   });
@@ -479,7 +520,7 @@ function renderProjects(container, sessions) {
     var totalSize = info.sessions.reduce(function(sum, s) { return sum + (s.file_size || 0); }, 0);
     var latest = info.sessions[0];
 
-    html += '<div class="project-card" onclick="onSearch(\'' + escHtml(name) + '\');document.querySelector(\'.search-box\').value=\'' + escHtml(name) + '\'">';
+    html += '<div class="project-card" onclick="openProject(\'' + escHtml(name).replace(/'/g, "\\'") + '\')">';
     html += '<div class="project-card-header">';
     html += '<span class="group-dot" style="background:' + color + '"></span>';
     html += '<span class="project-card-name">' + escHtml(name) + '</span>';
@@ -896,6 +937,18 @@ async function bulkDelete() {
   } catch (e) {
     showToast('Bulk delete failed');
   }
+}
+
+// ── Project actions ────────────────────────────────────────────
+
+function openProject(name) {
+  currentView = 'sessions';
+  searchQuery = name;
+  document.querySelector('.search-box').value = name;
+  document.querySelectorAll('.sidebar-item').forEach(function(el) {
+    el.classList.toggle('active', el.getAttribute('data-view') === 'sessions');
+  });
+  applyFilters();
 }
 
 // ── Themes ─────────────────────────────────────────────────────
