@@ -6,6 +6,7 @@ const { exec } = require('child_process');
 const { loadSessions, loadSessionDetail, deleteSession, getGitCommits, exportSessionMarkdown, getSessionPreview, searchFullText, getActiveSessions, getSessionReplay, getCostAnalytics, computeSessionCost } = require('./data');
 const { detectTerminals, openInTerminal, focusTerminalByPid } = require('./terminals');
 const { convertSession } = require('./convert');
+const { CHANGELOG } = require('./changelog');
 const { getHTML } = require('./html');
 
 function startServer(port, openBrowser = true) {
@@ -175,6 +176,11 @@ function startServer(port, openBrowser = true) {
       const sessions = loadSessions();
       const data = getCostAnalytics(sessions);
       json(res, data);
+    }
+
+    // ── Changelog ─────────────────────────────
+    else if (req.method === 'GET' && pathname === '/api/changelog') {
+      json(res, CHANGELOG);
     }
 
     // ── Version check ────────────────────────

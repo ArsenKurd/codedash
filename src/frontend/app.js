@@ -732,6 +732,11 @@ function render() {
     return;
   }
 
+  if (currentView === 'changelog') {
+    renderChangelog(content);
+    return;
+  }
+
   if (currentView === 'running') {
     renderRunning(content, sessions);
     return;
@@ -1746,6 +1751,40 @@ function focusSession(sessionId) {
   });
 }
 
+// ── Changelog view ────────────────────────────────────────────
+
+async function renderChangelog(container) {
+  container.innerHTML = '<div class="loading">Loading changelog...</div>';
+  try {
+    var resp = await fetch('/api/changelog');
+    var log = await resp.json();
+
+    var html = '<div class="changelog-container">';
+    html += '<h2 class="heatmap-title">Changelog</h2>';
+
+    log.forEach(function(entry, i) {
+      var isNew = i === 0;
+      html += '<div class="changelog-entry' + (isNew ? ' changelog-latest' : '') + '">';
+      html += '<div class="changelog-header">';
+      html += '<span class="changelog-version">v' + escHtml(entry.version) + '</span>';
+      if (isNew) html += '<span class="changelog-new">NEW</span>';
+      html += '<span class="changelog-date">' + escHtml(entry.date) + '</span>';
+      html += '</div>';
+      html += '<div class="changelog-title">' + escHtml(entry.title) + '</div>';
+      html += '<ul class="changelog-list">';
+      entry.changes.forEach(function(c) {
+        html += '<li>' + escHtml(c) + '</li>';
+      });
+      html += '</ul></div>';
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state">Failed to load changelog.</div>';
+  }
+}
+
 // ── Convert session ───────────────────────────────────────────
 
 async function convertTo(sessionId, project, targetFormat) {
@@ -1859,6 +1898,13 @@ async function checkForUpdates() {
     if (badge) {
       badge.textContent = 'v' + data.current;
     }
+
+    // Show "what's new" if version changed since last visit
+    var lastSeenVersion = localStorage.getItem('codedash-last-version');
+    if (lastSeenVersion && lastSeenVersion !== data.current) {
+      showToast('Updated to v' + data.current + ' — check Changelog!');
+    }
+    localStorage.setItem('codedash-last-version', data.current);
 
     if (data.updateAvailable) {
       if (badge) {
