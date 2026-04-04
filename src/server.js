@@ -5,6 +5,7 @@ const { URL } = require('url');
 const { exec } = require('child_process');
 const { loadSessions, loadSessionDetail, deleteSession, getGitCommits, exportSessionMarkdown, getSessionPreview, searchFullText, getActiveSessions, getSessionReplay, getCostAnalytics, computeSessionCost } = require('./data');
 const { detectTerminals, openInTerminal, focusTerminalByPid } = require('./terminals');
+const { convertSession } = require('./convert');
 const { getHTML } = require('./html');
 
 function startServer(port, openBrowser = true) {
@@ -108,6 +109,19 @@ function startServer(port, openBrowser = true) {
     else if (req.method === 'GET' && pathname === '/api/active') {
       const active = getActiveSessions();
       json(res, active);
+    }
+
+    // ── Convert session ─────────────────────
+    else if (req.method === 'POST' && pathname === '/api/convert') {
+      readBody(req, body => {
+        try {
+          const { sessionId, project, targetFormat } = JSON.parse(body);
+          const result = convertSession(sessionId, project || '', targetFormat);
+          json(res, result);
+        } catch (e) {
+          json(res, { ok: false, error: e.message }, 400);
+        }
+      });
     }
 
     // ── Focus terminal ──────────────────────

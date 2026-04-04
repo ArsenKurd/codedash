@@ -1081,6 +1081,8 @@ async function openDetail(s) {
   if (s.has_detail) {
     infoHtml += '<button class="launch-btn btn-secondary" onclick="closeDetail();openReplay(\'' + s.id + '\',\'' + escHtml(s.project || '') + '\')">Replay</button>';
     infoHtml += '<button class="launch-btn btn-secondary" onclick="exportMd(\'' + s.id + '\',\'' + escHtml(s.project || '') + '\')">Export MD</button>';
+    var convertTarget = s.tool === 'codex' ? 'claude' : 'codex';
+    infoHtml += '<button class="launch-btn btn-secondary" onclick="convertTo(\'' + s.id + '\',\'' + escHtml(s.project || '') + '\',\'' + convertTarget + '\')">Convert to ' + convertTarget + '</button>';
   }
   infoHtml += '<button class="star-btn detail-star' + (isStarred ? ' active' : '') + '" onclick="toggleStar(\'' + s.id + '\')">&#9733; ' + (isStarred ? 'Starred' : 'Star') + '</button>';
   infoHtml += '<button class="launch-btn btn-delete" onclick="showDeleteConfirm(\'' + s.id + '\',\'' + escHtml(s.project || '') + '\')">Delete</button>';
@@ -1742,6 +1744,31 @@ function focusSession(sessionId) {
   }).catch(function() {
     showToast('Focus failed');
   });
+}
+
+// ── Convert session ───────────────────────────────────────────
+
+async function convertTo(sessionId, project, targetFormat) {
+  if (!confirm('Convert this session to ' + targetFormat + '? A new session will be created.')) return;
+  showToast('Converting...');
+  try {
+    var resp = await fetch('/api/convert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sessionId, project: project, targetFormat: targetFormat }),
+    });
+    var data = await resp.json();
+    if (data.ok) {
+      showToast('Converted! New session: ' + data.target.sessionId.slice(0, 12));
+      // Refresh to show new session
+      await loadSessions();
+      closeDetail();
+    } else {
+      showToast('Error: ' + (data.error || 'unknown'));
+    }
+  } catch (e) {
+    showToast('Convert failed: ' + e.message);
+  }
 }
 
 // ── Install agents ────────────────────────────────────────────

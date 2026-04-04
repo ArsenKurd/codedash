@@ -3,6 +3,7 @@
 const { loadSessions, searchFullText, getSessionPreview, computeSessionCost } = require('../src/data');
 const { startServer } = require('../src/server');
 const { exportArchive, importArchive } = require('../src/migrate');
+const { convertSession } = require('../src/convert');
 
 const DEFAULT_PORT = 3847;
 const args = process.argv.slice(2);
@@ -130,6 +131,44 @@ switch (command) {
     break;
   }
 
+  case 'convert': {
+    const sid = args[1];
+    const target = args[2]; // 'claude' or 'codex'
+    if (!sid || !target) {
+      console.log(`
+  \x1b[36m\x1b[1mConvert session between agents\x1b[0m
+
+  Usage: codedash convert <session-id> <target-format>
+
+  Formats: claude, codex
+
+  Examples:
+    codedash convert 019d54ed codex     Convert Claude session to Codex
+    codedash convert 13ae5748 claude    Convert Codex session to Claude
+`);
+      break;
+    }
+    // Find full session ID
+    const allConv = loadSessions();
+    const match = allConv.find(s => s.id === sid || s.id.startsWith(sid));
+    if (!match) {
+      console.error(`  Session not found: ${sid}`);
+      process.exit(1);
+    }
+    console.log(`\n  Converting ${match.tool} session \x1b[1m${match.id.slice(0, 12)}\x1b[0m → ${target}...`);
+    const result = convertSession(match.id, match.project, target);
+    if (!result.ok) {
+      console.error(`  \x1b[31mError:\x1b[0m ${result.error}\n`);
+      process.exit(1);
+    }
+    console.log(`  \x1b[32mDone!\x1b[0m`);
+    console.log(`  New session: ${result.target.sessionId}`);
+    console.log(`  Messages:    ${result.target.messages}`);
+    console.log(`  File:        ${result.target.file}`);
+    console.log(`  Resume:      \x1b[2m${result.target.resumeCmd}\x1b[0m\n`);
+    break;
+  }
+
   case 'update':
   case 'upgrade': {
     const { execSync: execU } = require('child_process');
@@ -214,6 +253,7 @@ switch (command) {
     codedash show <session-id>           Show session details + messages
     codedash list [limit]                List sessions in terminal
     codedash stats                       Show session statistics
+    codedash convert <id> <format>       Convert session (claude/codex)
     codedash export [file.tar.gz]        Export all sessions to archive
     codedash import <file.tar.gz>        Import sessions from archive
     codedash update                      Update to latest version
