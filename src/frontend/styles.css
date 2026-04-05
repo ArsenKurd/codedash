@@ -1129,15 +1129,16 @@ body {
 }
 
 .heatmap-month-label {
-    width: 14px;
+    min-width: 14px;
     font-size: 10px;
     color: var(--text-muted);
-    text-align: center;
+    text-align: left;
     flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .heatmap-month-spacer {
-    width: 14px;
+    min-width: 14px;
     flex-shrink: 0;
 }
 

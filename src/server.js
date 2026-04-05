@@ -21,6 +21,13 @@ function startServer(port, openBrowser = true) {
       res.end(getHTML());
     }
 
+    // Favicon - inline SVG
+    else if (req.method === 'GET' && pathname === '/favicon.ico') {
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#60a5fa"/><path d="M8 8l8 4 8-4v16l-8 4-8-4z" fill="none" stroke="#fff" stroke-width="2"/></svg>';
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
+      res.end(svg);
+    }
+
     // ── Sessions API ────────────────────────
     else if (req.method === 'GET' && pathname === '/api/sessions') {
       const sessions = loadSessions();

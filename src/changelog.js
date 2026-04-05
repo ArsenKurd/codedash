@@ -2,6 +2,68 @@
 
 const CHANGELOG = [
   {
+    version: '5.3.0',
+    date: '2026-04-06',
+    title: 'Kiro CLI support',
+    changes: [
+      '4 agents: Claude Code, Codex, OpenCode, Kiro CLI',
+      'Kiro sessions from SQLite (~/Library/Application Support/kiro-cli/)',
+      'Orange badge for Kiro in sidebar filter',
+    ],
+  },
+  {
+    version: '5.2.0',
+    date: '2026-04-06',
+    title: 'Heatmap fix, Agents section, cmux',
+    changes: [
+      'Fix heatmap: scrollable grid, all months visible',
+      'Sidebar: "TOOLS" renamed to "AGENTS"',
+      'cmux terminal support with trigger-flash',
+    ],
+  },
+  {
+    version: '5.1.0',
+    date: '2026-04-05',
+    title: 'Bug fixes (#7 #8 #9), cmux focus',
+    changes: [
+      'Fix: delete dialog showing Install Kiro instead of delete',
+      'Fix: analytics respects date range filter',
+      'Fix: timeline grid/list toggle working',
+      'cmux focus walks full parent process chain',
+    ],
+  },
+  {
+    version: '5.0.0',
+    date: '2026-04-05',
+    title: 'Session handoff between agents',
+    changes: [
+      'codedash handoff <id> [target] — generate context document',
+      'Quick handoff: codedash handoff claude codex',
+      'Verbosity levels: minimal, standard, verbose, full',
+      'Handoff button in detail panel',
+      'Node >= 18',
+    ],
+  },
+  {
+    version: '4.2.0',
+    date: '2026-04-05',
+    title: 'OpenCode support',
+    changes: [
+      'Read sessions from ~/.local/share/opencode/opencode.db',
+      'SQLite parsing via sqlite3 CLI (no Node deps)',
+      'Purple badge for OpenCode',
+    ],
+  },
+  {
+    version: '4.1.0',
+    date: '2026-04-04',
+    title: 'In-app Changelog',
+    changes: [
+      'Changelog view with timeline design',
+      '"What\'s new" toast after updates',
+    ],
+  },
+  {
     version: '4.0.0',
     date: '2026-04-04',
     title: 'Cross-agent session conversion',
