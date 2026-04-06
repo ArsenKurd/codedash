@@ -5,17 +5,71 @@ const { execSync } = require('child_process');
 
 // ── Constants ──────────────────────────────────────────────
 
-const CLAUDE_DIR = path.join(os.homedir(), '.claude');
-const CODEX_DIR = path.join(os.homedir(), '.codex');
-const OPENCODE_DB = path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
-const KIRO_DB = path.join(os.homedir(), 'Library', 'Application Support', 'kiro-cli', 'data.sqlite3');
-const CURSOR_DIR = path.join(os.homedir(), '.cursor');
+// Detect WSL and find Windows user home for cross-OS data access
+function detectHomes() {
+  const homes = [os.homedir()];
+  // WSL: also check Windows-side home dirs
+  if (process.platform === 'linux' && fs.existsSync('/mnt/c/Users')) {
+    try {
+      const winUser = execSync('cmd.exe /C "echo %USERPROFILE%" 2>/dev/null', { encoding: 'utf8', timeout: 3000 }).trim();
+      if (winUser && winUser.includes('\\')) {
+        // Convert C:\Users\foo to /mnt/c/Users/foo
+        const drive = winUser[0].toLowerCase();
+        const winPath = '/mnt/' + drive + winUser.slice(2).replace(/\\/g, '/');
+        if (fs.existsSync(winPath) && !homes.includes(winPath)) {
+          homes.push(winPath);
+        }
+      }
+    } catch {
+      // Fallback: scan /mnt/c/Users/ for directories with .claude
+      try {
+        for (const u of fs.readdirSync('/mnt/c/Users')) {
+          const candidate = '/mnt/c/Users/' + u;
+          if (fs.existsSync(path.join(candidate, '.claude'))) {
+            if (!homes.includes(candidate)) homes.push(candidate);
+          }
+        }
+      } catch {}
+    }
+  }
+  return homes;
+}
+
+const ALL_HOMES = detectHomes();
+const IS_WSL = ALL_HOMES.length > 1;
+
+const CLAUDE_DIR = path.join(ALL_HOMES[0], '.claude');
+const CODEX_DIR = path.join(ALL_HOMES[0], '.codex');
+const OPENCODE_DB = path.join(ALL_HOMES[0], '.local', 'share', 'opencode', 'opencode.db');
+const KIRO_DB = path.join(ALL_HOMES[0], 'Library', 'Application Support', 'kiro-cli', 'data.sqlite3');
+const CURSOR_DIR = path.join(ALL_HOMES[0], '.cursor');
 const CURSOR_PROJECTS = path.join(CURSOR_DIR, 'projects');
 const CURSOR_CHATS = path.join(CURSOR_DIR, 'chats');
 const HISTORY_FILE = path.join(CLAUDE_DIR, 'history.jsonl');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 
+// On WSL, collect all alternative data dirs
+const EXTRA_CLAUDE_DIRS = ALL_HOMES.slice(1).map(h => path.join(h, '.claude')).filter(d => fs.existsSync(d));
+const EXTRA_CODEX_DIRS = ALL_HOMES.slice(1).map(h => path.join(h, '.codex')).filter(d => fs.existsSync(d));
+const EXTRA_CURSOR_DIRS = ALL_HOMES.slice(1).map(h => path.join(h, '.cursor')).filter(d => fs.existsSync(d));
+
+// Extra OpenCode/Kiro DBs on Windows side
+const EXTRA_OPENCODE_DBS = ALL_HOMES.slice(1).map(h => path.join(h, 'AppData', 'Local', 'opencode', 'opencode.db')).filter(d => fs.existsSync(d));
+const EXTRA_KIRO_DBS = ALL_HOMES.slice(1).map(h => path.join(h, 'AppData', 'Roaming', 'kiro-cli', 'data.sqlite3')).filter(d => fs.existsSync(d));
+
+if (IS_WSL) {
+  console.log('  \x1b[36m[WSL]\x1b[0m Detected Windows homes:', ALL_HOMES.slice(1).join(', '));
+  if (EXTRA_CLAUDE_DIRS.length) console.log('  \x1b[36m[WSL]\x1b[0m Extra Claude dirs:', EXTRA_CLAUDE_DIRS.join(', '));
+  if (EXTRA_CODEX_DIRS.length) console.log('  \x1b[36m[WSL]\x1b[0m Extra Codex dirs:', EXTRA_CODEX_DIRS.join(', '));
+  if (EXTRA_CURSOR_DIRS.length) console.log('  \x1b[36m[WSL]\x1b[0m Extra Cursor dirs:', EXTRA_CURSOR_DIRS.join(', '));
+}
+
 // ── Helpers ────────────────────────────────────────────────
+
+// Read file lines handling \r\n (Windows/WSL)
+function readLines(filePath) {
+  return fs.readFileSync(filePath, 'utf8').split('\n').map(l => l.replace(/\r$/, '')).filter(Boolean);
+}
 
 function scanOpenCodeSessions() {
   const sessions = [];
@@ -273,7 +327,7 @@ function scanCursorSessions() {
           let firstMsg = '';
           let msgCount = 0;
           try {
-            const firstLine = fs.readFileSync(sessFile, 'utf8').split('\n')[0];
+            const firstLine = fs.readFileSync(sessFile, 'utf8').split('\n')[0].replace(/\r$/, '');
             const d = JSON.parse(firstLine);
             const content = (d.message || {}).content;
             if (Array.isArray(content)) {
@@ -286,7 +340,7 @@ function scanCursorSessions() {
               }
             }
             // Count lines
-            msgCount = fs.readFileSync(sessFile, 'utf8').split('\n').filter(Boolean).length;
+            msgCount = readLines(sessFile).length;
           } catch {}
 
           sessions.push({
@@ -324,7 +378,7 @@ function scanCursorSessions() {
           let firstMsg = '';
           let msgCount = 0;
           try {
-            const firstLine = fs.readFileSync(filePath, 'utf8').split('\n')[0];
+            const firstLine = fs.readFileSync(filePath, 'utf8').split('\n')[0].replace(/\r$/, '');
             const d = JSON.parse(firstLine);
             if (d.role === 'user') {
               const content = (d.message || {}).content || d.content;
@@ -335,7 +389,7 @@ function scanCursorSessions() {
                 }
               }
             }
-            msgCount = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean).length;
+            msgCount = readLines(filePath).length;
           } catch {}
 
           sessions.push({
@@ -389,7 +443,7 @@ function loadCursorDetail(sessionId) {
   if (!filePath) return { messages: [] };
 
   const messages = [];
-  const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
+  const lines = readLines(filePath);
 
   for (const line of lines) {
     try {
@@ -423,7 +477,7 @@ function scanCodexSessions() {
   const sessions = [];
   const codexHistory = path.join(CODEX_DIR, 'history.jsonl');
   if (fs.existsSync(codexHistory)) {
-    const lines = fs.readFileSync(codexHistory, 'utf8').split('\n').filter(Boolean);
+    const lines = readLines(codexHistory);
     for (const line of lines) {
       try {
         const d = JSON.parse(line);
@@ -475,7 +529,7 @@ function scanCodexSessions() {
         // Try to extract cwd from session_meta
         let cwd = '';
         try {
-          const firstLine = fs.readFileSync(f, 'utf8').split('\n')[0];
+          const firstLine = fs.readFileSync(f, 'utf8').split('\n')[0].replace(/\r$/, '');
           const meta = JSON.parse(firstLine);
           if (meta.type === 'session_meta' && meta.payload && meta.payload.cwd) {
             cwd = meta.payload.cwd;
@@ -527,7 +581,7 @@ function loadSessions() {
 
   // Load Claude Code sessions
   if (fs.existsSync(HISTORY_FILE)) {
-    const lines = fs.readFileSync(HISTORY_FILE, 'utf8').split('\n').filter(Boolean);
+    const lines = readLines(HISTORY_FILE);
     for (const line of lines) {
       try {
         const d = JSON.parse(line);
@@ -593,6 +647,65 @@ function loadSessions() {
     }
   } catch {}
 
+  // WSL: also load from Windows-side dirs
+  for (const extraClaudeDir of EXTRA_CLAUDE_DIRS) {
+    try {
+      const extraHistory = path.join(extraClaudeDir, 'history.jsonl');
+      if (fs.existsSync(extraHistory)) {
+        const lines = readLines(extraHistory);
+        for (const line of lines) {
+          try {
+            const d = JSON.parse(line);
+            const sid = d.sessionId;
+            if (!sid || sessions[sid]) continue;
+            sessions[sid] = {
+              id: sid, tool: 'claude',
+              project: d.project || '', project_short: (d.project || '').replace(os.homedir(), '~'),
+              first_ts: d.timestamp, last_ts: d.timestamp,
+              messages: 0, first_message: '',
+            };
+          } catch {}
+          const s = sessions[d.sessionId];
+          if (s) { s.last_ts = Math.max(s.last_ts, d.timestamp); s.first_ts = Math.min(s.first_ts, d.timestamp); s.messages++; if (d.display && d.display !== 'exit' && !s.first_message) s.first_message = d.display.slice(0, 200); }
+        }
+      }
+      // Scan extra projects dirs
+      const extraProjects = path.join(extraClaudeDir, 'projects');
+      if (fs.existsSync(extraProjects)) {
+        for (const proj of fs.readdirSync(extraProjects)) {
+          const projDir = path.join(extraProjects, proj);
+          if (!fs.statSync(projDir).isDirectory()) continue;
+          for (const file of fs.readdirSync(projDir)) {
+            if (!file.endsWith('.jsonl')) continue;
+            const sid = file.replace('.jsonl', '');
+            if (sessions[sid]) { if (!sessions[sid].has_detail) { sessions[sid].has_detail = true; sessions[sid].file_size = fs.statSync(path.join(projDir, file)).size; } continue; }
+            const fp = path.join(projDir, file);
+            const stat = fs.statSync(fp);
+            let projectPath = '', tool = 'claude', msgCount = 0, firstMsg = '', firstTs = stat.mtimeMs, lastTs = stat.mtimeMs;
+            try {
+              const sLines = readLines(fp);
+              let entrypointFound = false;
+              for (const sl of sLines) {
+                try {
+                  const entry = JSON.parse(sl);
+                  if (entry.type === 'user' || entry.type === 'assistant') msgCount++;
+                  if (entry.timestamp) { if (entry.timestamp < firstTs) firstTs = entry.timestamp; if (entry.timestamp > lastTs) lastTs = entry.timestamp; }
+                  if (!projectPath && entry.type === 'user' && entry.cwd) projectPath = entry.cwd;
+                  if (!entrypointFound && entry.type === 'user' && entry.entrypoint) { entrypointFound = true; if (entry.entrypoint !== 'cli') tool = 'claude-ext'; }
+                  if (!firstMsg && entry.type === 'user' && entry.message && entry.message.content) {
+                    const content = entry.message.content;
+                    if (typeof content === 'string') firstMsg = content.slice(0, 200);
+                  }
+                } catch {}
+              }
+            } catch {}
+            sessions[sid] = { id: sid, tool, project: projectPath, project_short: projectPath.replace(os.homedir(), '~'), first_ts: firstTs, last_ts: lastTs, messages: msgCount, first_message: firstMsg, has_detail: true, file_size: stat.size, detail_messages: msgCount };
+          }
+        }
+      }
+    } catch {}
+  }
+
   // Enrich Claude sessions with detail file info
   for (const [sid, s] of Object.entries(sessions)) {
     if (s.tool !== 'claude') continue;
@@ -603,7 +716,7 @@ function loadSessions() {
       s.file_size = fs.statSync(sessionFile).size;
       try {
         let msgCount = 0;
-        const sLines = fs.readFileSync(sessionFile, 'utf8').split('\n').filter(Boolean);
+        const sLines = readLines(sessionFile);
         for (const sl of sLines) {
           try {
             const entry = JSON.parse(sl);
@@ -638,7 +751,7 @@ function loadSessions() {
           let firstTs = stat.mtimeMs;
           let lastTs = stat.mtimeMs;
           try {
-            const sLines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
+            const sLines = readLines(filePath);
             let entrypointFound = false;
             for (const sl of sLines) {
               try {
@@ -719,7 +832,7 @@ function loadSessionDetail(sessionId, project) {
   }
 
   const messages = [];
-  const lines = fs.readFileSync(found.file, 'utf8').split('\n').filter(Boolean);
+  const lines = readLines(found.file);
 
   for (const line of lines) {
     try {
@@ -769,7 +882,7 @@ function deleteSession(sessionId, project) {
 
   // 2. Remove entries from history.jsonl
   if (fs.existsSync(HISTORY_FILE)) {
-    const lines = fs.readFileSync(HISTORY_FILE, 'utf8').split('\n').filter(Boolean);
+    const lines = readLines(HISTORY_FILE);
     const filtered = lines.filter(line => {
       try {
         const d = JSON.parse(line);
@@ -829,7 +942,7 @@ function exportSessionMarkdown(sessionId, project) {
     return `# Session ${sessionId}\n\nSession file not found.\n`;
   }
 
-  const lines = fs.readFileSync(sessionFile, 'utf8').split('\n').filter(Boolean);
+  const lines = readLines(sessionFile);
   const parts = [`# Session ${sessionId}\n\n**Project:** ${project}\n`];
 
   for (const line of lines) {
@@ -868,6 +981,17 @@ function findSessionFile(sessionId, project) {
     for (const proj of fs.readdirSync(PROJECTS_DIR)) {
       const f = path.join(PROJECTS_DIR, proj, `${sessionId}.jsonl`);
       if (fs.existsSync(f)) return { file: f, format: 'claude' };
+    }
+  }
+
+  // WSL: try extra Claude dirs
+  for (const extraDir of EXTRA_CLAUDE_DIRS) {
+    const extraProjects = path.join(extraDir, 'projects');
+    if (fs.existsSync(extraProjects)) {
+      for (const proj of fs.readdirSync(extraProjects)) {
+        const f = path.join(extraProjects, proj, `${sessionId}.jsonl`);
+        if (fs.existsSync(f)) return { file: f, format: 'claude' };
+      }
     }
   }
 
@@ -990,7 +1114,7 @@ function getSessionPreview(sessionId, project, limit) {
   }
 
   const messages = [];
-  const lines = fs.readFileSync(found.file, 'utf8').split('\n').filter(Boolean);
+  const lines = readLines(found.file);
 
   for (const line of lines) {
     if (messages.length >= limit) break;
@@ -1045,7 +1169,7 @@ function buildSearchIndex(sessions) {
     if (!found) continue;
 
     try {
-      const lines = fs.readFileSync(found.file, 'utf8').split('\n').filter(Boolean);
+      const lines = readLines(found.file);
       const texts = [];
 
       for (const line of lines) {
@@ -1133,7 +1257,7 @@ function getSessionReplay(sessionId, project) {
   if (!found) return { messages: [], duration: 0 };
 
   const messages = [];
-  const lines = fs.readFileSync(found.file, 'utf8').split('\n').filter(Boolean);
+  const lines = readLines(found.file);
 
   for (const line of lines) {
     try {
@@ -1213,7 +1337,7 @@ function computeSessionCost(sessionId, project) {
   let model = '';
 
   try {
-    const lines = fs.readFileSync(found.file, 'utf8').split('\n').filter(Boolean);
+    const lines = readLines(found.file);
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
