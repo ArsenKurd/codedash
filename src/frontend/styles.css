@@ -1102,95 +1102,134 @@ body {
     color: var(--text-muted);
 }
 
-/* ── Heatmap ────────────────────────────────────────────────── */
+/* ── GitHub-style Activity ──────────────────────────────────── */
 
-.heatmap-container {
+.gh-activity {
     padding: 20px;
+    max-width: 900px;
+}
+
+.gh-header {
+    margin-bottom: 8px;
+}
+
+.gh-total {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.gh-graph {
     overflow-x: auto;
+    padding: 8px 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-card);
+    padding: 16px;
 }
 
-.heatmap-container .heatmap-row,
-.heatmap-container .heatmap-months {
-    min-width: max-content;
+.gh-graph svg rect {
+    outline: 1px solid rgba(27,31,35,0.04);
+    outline-offset: -1px;
 }
 
-.heatmap-title {
-    font-size: 18px;
-    font-weight: 600;
-    margin-bottom: 20px;
-    color: var(--text-primary);
-}
-
-.heatmap-months {
+.gh-footer {
     display: flex;
-    gap: 2px;
-    margin-bottom: 4px;
-    padding-left: 0;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 12px;
 }
 
-.heatmap-month-label {
-    min-width: 14px;
-    font-size: 10px;
+.gh-link {
     color: var(--text-muted);
-    text-align: left;
-    flex-shrink: 0;
-    white-space: nowrap;
+    text-decoration: none;
 }
 
-.heatmap-month-spacer {
-    min-width: 14px;
-    flex-shrink: 0;
-}
-
-.heatmap-row {
+.gh-legend {
     display: flex;
-    gap: 2px;
-    margin-bottom: 2px;
-}
-
-.heatmap-day-label {
-    width: 30px;
-    font-size: 10px;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
     color: var(--text-muted);
-    text-align: right;
-    padding-right: 6px;
-    line-height: 14px;
-    flex-shrink: 0;
 }
 
-.heatmap-summary {
-    display: flex;
-    gap: 32px;
+.gh-legend-cell {
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    display: inline-block;
+}
+
+/* Stats grid */
+.gh-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px;
     margin-top: 20px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
 }
 
-.heatmap-stat {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+.gh-stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
 }
 
-.heatmap-stat-val {
-    font-size: 20px;
+.gh-stat-num {
+    font-size: 24px;
     font-weight: 700;
     color: var(--text-primary);
 }
 
-.heatmap-stat-label {
-    font-size: 12px;
-    color: var(--text-muted);
-}
-
-.heatmap-legend {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin-top: 12px;
+.gh-stat-label {
     font-size: 11px;
     color: var(--text-muted);
+    margin-top: 2px;
 }
+
+/* Tool breakdown */
+.gh-tools {
+    margin-top: 20px;
+}
+
+.gh-tool-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.gh-tool-name {
+    width: 80px;
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.gh-tool-bar {
+    flex: 1;
+    height: 8px;
+    background: var(--bg-card);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.gh-tool-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+
+.gh-tool-val {
+    font-size: 12px;
+    color: var(--text-muted);
+    min-width: 80px;
+    text-align: right;
+}
+
+/* Light theme overrides for SVG */
+[data-theme="light"] .gh-graph svg rect { outline-color: rgba(27,31,35,0.06); }
 
 /* ── Detail panel additions ─────────────────────────────────── */
 
