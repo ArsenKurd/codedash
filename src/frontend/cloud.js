@@ -132,6 +132,7 @@ async function setupCloud() {
   var input = document.getElementById('cloudPassInput');
   if (!input || !input.value) return;
   if (input.value.length < 4) { showToast('Passphrase too short (min 4)', 'error'); return; }
+  console.log('[CLOUD] setup: configuring encryption...');
   try {
     var resp = await fetch('/api/cloud/setup', {
       method: 'POST',
@@ -139,6 +140,7 @@ async function setupCloud() {
       body: JSON.stringify({ passphrase: input.value }),
     });
     var data = await resp.json();
+    console.log('[CLOUD] setup response:', resp.status, data);
     if (data.ok) {
       cloudConfigured = true;
       cloudUnlocked = true;
@@ -159,12 +161,16 @@ async function checkCloudLockState() {
     cloudConfigured = data.configured;
     cloudServerHasSalt = data.serverHasSalt;
     cloudUnlocked = data.unlocked;
-  } catch (e) {}
+    console.log('[CLOUD] lock state:', data);
+  } catch (e) {
+    console.error('[CLOUD] lock state error:', e);
+  }
 }
 
 async function unlockCloud() {
   var input = document.getElementById('cloudPassInput');
   if (!input || !input.value) return;
+  console.log('[CLOUD] unlock: attempting...');
   try {
     var resp = await fetch('/api/cloud/unlock', {
       method: 'POST',
@@ -172,6 +178,7 @@ async function unlockCloud() {
       body: JSON.stringify({ passphrase: input.value }),
     });
     var data = await resp.json();
+    console.log('[CLOUD] unlock response:', resp.status, data);
     if (data.ok) {
       cloudUnlocked = true;
       showToast('Cloud unlocked');
@@ -194,6 +201,7 @@ function lockCloud() {
 async function loadCloudData() {
   cloudLoading = true;
   applyFilters();
+  console.log('[CLOUD] loading data...');
 
   try {
     await checkCloudLockState();
@@ -206,15 +214,21 @@ async function loadCloudData() {
       var listData = await listResp.json();
       cloudSessions = listData.sessions || [];
       cloudSessionIds = new Set(cloudSessions.map(function(s) { return s.session_id; }));
+      console.log('[CLOUD] remote:', cloudSessions.length, 'sessions');
+    } else {
+      console.error('[CLOUD] list failed:', listResp.status);
     }
     if (statsResp.ok) {
       cloudStats = await statsResp.json();
+      console.log('[CLOUD] stats:', cloudStats);
     }
     if (localResp.ok) {
       cloudLocalSessions = await localResp.json();
       if (!Array.isArray(cloudLocalSessions)) cloudLocalSessions = [];
+      console.log('[CLOUD] local:', cloudLocalSessions.length, 'sessions');
     }
   } catch (e) {
+    console.error('[CLOUD] load error:', e);
     showToast('Cloud: ' + e.message, 'error');
   }
 
@@ -224,6 +238,7 @@ async function loadCloudData() {
 
 async function cloudPushOne(sessionId, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  console.log('[CLOUD] push', sessionId.slice(0, 12));
   try {
     var resp = await fetch('/api/cloud/push', {
       method: 'POST',
@@ -232,14 +247,17 @@ async function cloudPushOne(sessionId, btn) {
     });
     var data = await resp.json();
     if (data.ok) {
+      console.log('[CLOUD] push OK', sessionId.slice(0, 12), (data.size / 1024).toFixed(0) + 'KB');
       showToast('Pushed (' + (data.size / 1024).toFixed(0) + ' KB)');
       cloudSessionIds.add(sessionId);
       if (btn) { btn.textContent = 'Done'; btn.disabled = true; }
     } else {
+      console.error('[CLOUD] push FAIL', sessionId.slice(0, 12), resp.status, data);
       showToast(data.error || 'Push failed', 'error');
       if (btn) { btn.disabled = false; btn.textContent = 'Push'; }
     }
   } catch (e) {
+    console.error('[CLOUD] push error', sessionId.slice(0, 12), e);
     showToast('Error: ' + e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Push'; }
   }
@@ -295,6 +313,7 @@ async function cloudPullAll() {
 
 async function cloudPullOne(sessionId, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  console.log('[CLOUD] pull', sessionId.slice(0, 12));
   try {
     var resp = await fetch('/api/cloud/pull', {
       method: 'POST',
@@ -303,15 +322,19 @@ async function cloudPullOne(sessionId, btn) {
     });
     var data = await resp.json();
     if (data.ok) {
+      console.log('[CLOUD] pull OK', sessionId.slice(0, 12), data.file ? data.file.slice(-40) : '');
       showToast('Pulled');
       if (btn) btn.textContent = 'Done';
     } else if (data.skipped) {
+      console.log('[CLOUD] pull SKIP', sessionId.slice(0, 12), '(exists locally)');
       if (btn) btn.textContent = 'Local';
     } else {
+      console.error('[CLOUD] pull FAIL', sessionId.slice(0, 12), resp.status, data);
       showToast(data.error || 'Pull failed', 'error');
       if (btn) { btn.disabled = false; btn.textContent = 'Pull'; }
     }
   } catch (e) {
+    console.error('[CLOUD] pull error', sessionId.slice(0, 12), e);
     showToast('Error: ' + e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Pull'; }
   }

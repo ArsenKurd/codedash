@@ -519,7 +519,10 @@ function unlockCloudKey(passphrase) {
 
 async function handleCloudProxy(req, res, pathname) {
   const profile = loadGitHubProfile();
-  if (!profile || !profile.authenticated) return json(res, { error: 'Connect GitHub first' }, 401);
+  if (!profile || !profile.authenticated) {
+    log('CLOUD', `${req.method} ${pathname} → 401 not authenticated`);
+    return json(res, { error: 'Connect GitHub first' }, 401);
+  }
 
   // POST /api/cloud/setup — create passphrase (first time) or re-enter on new device
   if (req.method === 'POST' && pathname === '/api/cloud/setup') {
@@ -527,28 +530,32 @@ async function handleCloudProxy(req, res, pathname) {
       readBody(req, async (body) => {
         try {
           const { passphrase } = JSON.parse(body);
-          if (!passphrase || passphrase.length < 4) { json(res, { error: 'Passphrase too short (min 4 chars)' }, 400); return resolve(); }
+          if (!passphrase || passphrase.length < 4) {
+            log('CLOUD', 'setup: passphrase too short');
+            json(res, { error: 'Passphrase too short (min 4 chars)' }, 400); return resolve();
+          }
 
           const existing = loadCloudKey();
           if (existing && existing.salt) {
-            // Already configured — just unlock
+            log('CLOUD', 'setup: local key exists, unlocking...');
             const result = unlockCloudKey(passphrase);
+            log('CLOUD', `setup unlock: ${result.error ? 'FAIL ' + result.error : 'OK'}`);
             json(res, result.error ? result : { ok: true }, result.error ? 400 : 200);
             return resolve();
           }
 
           // Check if server has a salt from another device
+          log('CLOUD', 'setup: checking server for existing salt...');
           const verifyRes = await cloudApiRequest('POST', '/api/auth/verify', profile.token);
           const serverSalt = verifyRes.status === 200 ? verifyRes.data?.user?.encryption_salt : null;
 
           let salt;
           if (serverSalt) {
-            // Another device already set up — use same salt
+            log('CLOUD', 'setup: using salt from another device');
             salt = Buffer.from(serverSalt, 'hex');
           } else {
-            // First time — generate new salt
+            log('CLOUD', 'setup: first device, generating new salt');
             salt = crypto.randomBytes(16);
-            // Sync salt to cloud server
             await cloudApiRequest('PUT', '/api/auth/salt', profile.token, JSON.stringify({ salt: salt.toString('hex') }));
           }
 
@@ -557,9 +564,13 @@ async function handleCloudProxy(req, res, pathname) {
           saveCloudKey({ salt: salt.toString('hex'), verifier: verifier.toString('hex') });
 
           _cachedCloudKey = key;
+          log('CLOUD', `setup: OK (new=${!serverSalt})`);
           json(res, { ok: true, isNew: !serverSalt });
           resolve();
-        } catch (e) { json(res, { error: e.message }, 500); resolve(); }
+        } catch (e) {
+          log('ERROR', `cloud setup: ${e.message}`);
+          json(res, { error: e.message }, 500); resolve();
+        }
       });
     });
   }
@@ -567,6 +578,7 @@ async function handleCloudProxy(req, res, pathname) {
   // POST /api/cloud/lock — clear cached key
   if (req.method === 'POST' && pathname === '/api/cloud/lock') {
     _cachedCloudKey = null;
+    log('CLOUD', 'locked (key cleared)');
     json(res, { ok: true });
     return;
   }
@@ -579,10 +591,14 @@ async function handleCloudProxy(req, res, pathname) {
           const { passphrase } = JSON.parse(body);
           if (!passphrase) { json(res, { error: 'passphrase required' }, 400); return resolve(); }
           const result = unlockCloudKey(passphrase);
+          log('CLOUD', `unlock: ${result.error ? 'FAIL ' + result.error : 'OK'}`);
           if (result.error) { json(res, result, 400); return resolve(); }
           json(res, { ok: true });
           resolve();
-        } catch (e) { json(res, { error: e.message }, 500); resolve(); }
+        } catch (e) {
+          log('ERROR', `cloud unlock: ${e.message}`);
+          json(res, { error: e.message }, 500); resolve();
+        }
       });
     });
   }
@@ -618,14 +634,22 @@ async function handleCloudProxy(req, res, pathname) {
           if (!sessionId) { json(res, { error: 'sessionId required' }, 400); return resolve(); }
 
           const key = getCloudKey();
-          if (!key) { json(res, { error: 'Cloud locked. Enter passphrase first.' }, 403); return resolve(); }
+          if (!key) {
+            log('CLOUD', `push ${sessionId.slice(0,8)}: LOCKED`);
+            json(res, { error: 'Cloud locked. Enter passphrase first.' }, 403); return resolve();
+          }
 
+          log('CLOUD', `push ${sessionId.slice(0,8)}: serializing...`);
           const sessions = loadSessions();
           const canonical = serializeSession(sessionId, sessions);
-          if (!canonical) { json(res, { error: 'Session not found locally' }, 404); return resolve(); }
+          if (!canonical) {
+            log('CLOUD', `push ${sessionId.slice(0,8)}: session not found`);
+            json(res, { error: 'Session not found locally' }, 404); return resolve();
+          }
 
           const blob = encryptSession(canonical, key);
           const checksum = crypto.createHash('sha256').update(blob).digest('hex');
+          log('CLOUD', `push ${sessionId.slice(0,8)}: ${canonical.agent} ${canonical.messageCount}msgs ${(blob.length/1024).toFixed(0)}KB → uploading...`);
 
           const result = await cloudApiRequest('POST', '/api/sessions/upload', profile.token, blob, {
             'Content-Type': 'application/octet-stream',
@@ -640,12 +664,17 @@ async function handleCloudProxy(req, res, pathname) {
           });
 
           if (result.status === 200) {
+            log('CLOUD', `push ${sessionId.slice(0,8)}: OK (${(blob.length/1024).toFixed(0)}KB)`);
             json(res, { ok: true, size: blob.length });
           } else {
+            log('CLOUD', `push ${sessionId.slice(0,8)}: FAIL ${result.status} ${JSON.stringify(result.data).slice(0,200)}`);
             json(res, result.data || { error: 'Upload failed' }, result.status);
           }
           resolve();
-        } catch (e) { json(res, { error: e.message }, 500); resolve(); }
+        } catch (e) {
+          log('ERROR', `cloud push: ${e.message}`);
+          json(res, { error: e.message }, 500); resolve();
+        }
       });
     });
   }
@@ -659,23 +688,37 @@ async function handleCloudProxy(req, res, pathname) {
           if (!sessionId) { json(res, { error: 'sessionId required' }, 400); return resolve(); }
 
           const key = getCloudKey();
-          if (!key) { json(res, { error: 'Cloud locked. Enter passphrase first.' }, 403); return resolve(); }
+          if (!key) {
+            log('CLOUD', `pull ${sessionId.slice(0,12)}: LOCKED`);
+            json(res, { error: 'Cloud locked. Enter passphrase first.' }, 403); return resolve();
+          }
 
+          log('CLOUD', `pull ${sessionId.slice(0,12)}: downloading...`);
           const dlRes = await cloudApiRequest('GET', `/api/sessions/${encodeURIComponent(sessionId)}/download`, profile.token);
-          if (dlRes.status !== 200) { json(res, { error: 'Download failed' }, dlRes.status); return resolve(); }
+          if (dlRes.status !== 200) {
+            log('CLOUD', `pull ${sessionId.slice(0,12)}: download FAIL ${dlRes.status}`);
+            json(res, { error: 'Download failed' }, dlRes.status); return resolve();
+          }
 
+          log('CLOUD', `pull ${sessionId.slice(0,12)}: decrypting ${(dlRes.data.length/1024).toFixed(0)}KB...`);
           const canonical = decryptSession(dlRes.data, key);
           const result = deserializeSession(canonical);
+          log('CLOUD', `pull ${sessionId.slice(0,12)}: ${result.skipped ? 'SKIPPED (exists)' : 'OK → ' + (result.file || '').slice(-40)}`);
           json(res, { ok: true, ...result });
           resolve();
-        } catch (e) { json(res, { error: e.message }, 500); resolve(); }
+        } catch (e) {
+          log('ERROR', `cloud pull: ${e.message}`);
+          json(res, { error: e.message }, 500); resolve();
+        }
       });
     });
   }
 
   // GET /api/cloud/list — proxy to cloud server
   if (req.method === 'GET' && pathname === '/api/cloud/list') {
+    log('CLOUD', 'list: fetching from cloud server...');
     const result = await cloudApiRequest('GET', '/api/sessions?limit=500', profile.token);
+    log('CLOUD', `list: ${result.status === 200 ? (result.data?.sessions?.length || 0) + ' sessions' : 'FAIL ' + result.status}`);
     json(res, result.data, result.status);
     return;
   }
@@ -683,6 +726,7 @@ async function handleCloudProxy(req, res, pathname) {
   // GET /api/cloud/status — proxy stats
   if (req.method === 'GET' && pathname === '/api/cloud/status') {
     const result = await cloudApiRequest('GET', '/api/sessions/stats', profile.token);
+    log('CLOUD', `status: ${result.status === 200 ? JSON.stringify(result.data).slice(0,100) : 'FAIL ' + result.status}`);
     json(res, result.data, result.status);
     return;
   }
@@ -691,11 +735,14 @@ async function handleCloudProxy(req, res, pathname) {
   const deleteMatch = pathname.match(/^\/api\/cloud\/([^/]+)$/);
   if (req.method === 'DELETE' && deleteMatch) {
     const sid = decodeURIComponent(deleteMatch[1]);
+    log('CLOUD', `delete ${sid.slice(0,12)}...`);
     const result = await cloudApiRequest('DELETE', `/api/sessions/${encodeURIComponent(sid)}`, profile.token);
+    log('CLOUD', `delete ${sid.slice(0,12)}: ${result.status === 200 ? 'OK' : 'FAIL ' + result.status}`);
     json(res, result.data, result.status);
     return;
   }
 
+  log('CLOUD', `unknown endpoint: ${req.method} ${pathname}`);
   json(res, { error: 'Unknown cloud endpoint' }, 404);
 }
 
