@@ -71,6 +71,25 @@ function readLines(filePath) {
   return fs.readFileSync(filePath, 'utf8').split('\n').map(l => l.replace(/\r$/, '')).filter(Boolean);
 }
 
+// OpenCode built-in tools that should NOT be treated as MCP servers
+const OPENCODE_BUILTIN_TOOLS = new Set([
+  'read', 'write', 'edit', 'bash', 'glob', 'grep', 'task', 'todowrite',
+  'delegate_task', 'apply_patch', 'webfetch', 'websearch', 'slashcommand',
+  'question', 'background_task', 'background_output', 'background_cancel',
+  'lsp_diagnostics', 'ast_grep_search', 'ast_grep_replace', 'session_read',
+  'skill', 'skill_mcp', 'call_omo_agent',
+]);
+
+// OpenCode tool names like "chrome-devtools_take_screenshot" → server "chrome-devtools"
+// Returns null if it's a built-in tool, otherwise the server name (first segment).
+function parseOpenCodeMcpServer(toolName) {
+  if (!toolName || OPENCODE_BUILTIN_TOOLS.has(toolName)) return null;
+  // Match server_tool or server-with-dashes_tool
+  const idx = toolName.indexOf('_');
+  if (idx <= 0) return null;
+  return toolName.slice(0, idx);
+}
+
 function parseClaudeSessionFile(sessionFile) {
   if (!fs.existsSync(sessionFile)) return null;
 
@@ -91,6 +110,8 @@ function parseClaudeSessionFile(sessionFile) {
   let lastTs = stat.mtimeMs;
   let entrypointFound = false;
   let worktreeOriginalCwd = '';
+  const mcpSet = new Set();
+  const skillSet = new Set();
 
   for (const line of lines) {
     try {
@@ -120,6 +141,23 @@ function parseClaudeSessionFile(sessionFile) {
         const content = extractContent(entry.message.content).trim();
         if (content) firstMsg = content.slice(0, 200);
       }
+      // MCP/Skill extraction from assistant tool_use blocks
+      if (entry.type === 'assistant') {
+        const aContent = (entry.message || {}).content;
+        if (Array.isArray(aContent)) {
+          for (const block of aContent) {
+            if (!block || block.type !== 'tool_use') continue;
+            const name = block.name || '';
+            if (name.startsWith('mcp__')) {
+              const parts = name.split('__');
+              if (parts.length >= 3) mcpSet.add(parts[1]);
+            } else if (name === 'Skill') {
+              const sk = (block.input || {}).skill;
+              if (sk) skillSet.add(sk.includes(':') ? sk.split(':')[0] : sk);
+            }
+          }
+        }
+      }
     } catch {}
   }
 
@@ -133,6 +171,8 @@ function parseClaudeSessionFile(sessionFile) {
     lastTs,
     fileSize: stat.size,
     worktreeOriginalCwd,
+    mcpServers: Array.from(mcpSet),
+    skills: Array.from(skillSet),
   };
 }
 
@@ -144,6 +184,8 @@ function mergeClaudeSessionDetail(session, summary, sessionFile) {
   session.file_size = summary.fileSize;
   session.detail_messages = summary.msgCount;
   session._session_file = sessionFile;
+  session.mcp_servers = summary.mcpServers || [];
+  session.skills = summary.skills || [];
 
   if (!session.project && summary.projectPath) {
     session.project = summary.projectPath;
@@ -230,6 +272,43 @@ function scanOpenCodeSessions() {
 
     if (!rows) return sessions;
 
+    // Get MCP/Skills usage per session in one query
+    const sessionMcp = {};
+    const sessionSkills = {};
+    try {
+      const toolRows = execSync(
+        `sqlite3 -separator $'\\t' "${OPENCODE_DB}" "SELECT session_id, json_extract(data, '\\$.tool'), json_extract(data, '\\$.state.input.name') FROM part WHERE json_extract(data, '\\$.type') = 'tool'"`,
+        { encoding: 'utf8', timeout: 10000, maxBuffer: 50 * 1024 * 1024 }
+      ).trim();
+      if (toolRows) {
+        for (const tr of toolRows.split('\n')) {
+          const cols = tr.split('\t');
+          if (cols.length < 2) continue;
+          const sid = cols[0];
+          const toolName = cols[1];
+          const skillName = cols[2];
+          if (!sid || !toolName) continue;
+          // Skill tool: collect skill name
+          if (toolName === 'skill' || toolName === 'skill_mcp') {
+            if (skillName) {
+              if (!sessionSkills[sid]) sessionSkills[sid] = new Set();
+              // Plugin prefix: "superpowers:writing-plans" -> "superpowers"
+              // For OpenCode keep full name (e.g. "openspec-propose", "chrome-devtools")
+              const sk = skillName.includes(':') ? skillName.split(':')[0] : skillName;
+              sessionSkills[sid].add(sk);
+            }
+            continue;
+          }
+          // MCP tool: extract server name
+          const server = parseOpenCodeMcpServer(toolName);
+          if (server) {
+            if (!sessionMcp[sid]) sessionMcp[sid] = new Set();
+            sessionMcp[sid].add(server);
+          }
+        }
+      }
+    } catch {}
+
     for (const row of rows.split('\n')) {
       const parts = row.split('\t');
       if (parts.length < 6) continue;
@@ -247,6 +326,8 @@ function scanOpenCodeSessions() {
         has_detail: true,
         file_size: 0,
         detail_messages: parseInt(msgCount) || 0,
+        mcp_servers: sessionMcp[id] ? Array.from(sessionMcp[id]) : [],
+        skills: sessionSkills[id] ? Array.from(sessionSkills[id]) : [],
       });
     }
   } catch {}
@@ -292,14 +373,39 @@ function loadOpenCodeDetail(sessionId) {
       const role = msgData.role;
       if (role !== 'user' && role !== 'assistant') continue;
 
-      // Extract text from parts
+      // Extract text + tools from parts
       let content = '';
+      const tools = [];
+      const toolSeen = new Set();
       if (partsRaw) {
         for (const partStr of partsRaw.split('|||')) {
           try {
             const part = JSON.parse(partStr);
             if (part.type === 'text' && part.text) {
               content += part.text + '\n';
+            } else if (part.type === 'tool' && part.tool) {
+              const toolName = part.tool;
+              if (toolName === 'skill' || toolName === 'skill_mcp') {
+                const skillRaw = part.state && part.state.input && part.state.input.name;
+                if (skillRaw) {
+                  const sk = skillRaw.includes(':') ? skillRaw.split(':')[0] : skillRaw;
+                  const key = 'skill:' + sk;
+                  if (!toolSeen.has(key)) {
+                    toolSeen.add(key);
+                    tools.push({ type: 'skill', skill: sk });
+                  }
+                }
+              } else {
+                const server = parseOpenCodeMcpServer(toolName);
+                if (server) {
+                  const tool = toolName.slice(server.length + 1);
+                  const key = 'mcp:' + server + ':' + tool;
+                  if (!toolSeen.has(key)) {
+                    toolSeen.add(key);
+                    tools.push({ type: 'mcp', server: server, tool: tool });
+                  }
+                }
+              }
             }
           } catch {}
         }
@@ -310,13 +416,15 @@ function loadOpenCodeDetail(sessionId) {
 
       const tokens = msgData.tokens || {};
 
-      messages.push({
+      const msg = {
         role: role,
         content: content.slice(0, 2000),
         uuid: '',
         model: msgData.modelID || msgData.model?.modelID || '',
         tokens: tokens,
-      });
+      };
+      if (tools.length > 0) msg.tools = tools;
+      messages.push(msg);
     }
 
     return { messages: messages.slice(0, 200) };
@@ -648,6 +756,7 @@ function parseCodexSessionFile(sessionFile) {
   let firstMsg = '';
   let firstTs = stat.mtimeMs;
   let lastTs = stat.mtimeMs;
+  const mcpSet = new Set();
 
   for (const line of lines) {
     try {
@@ -664,6 +773,17 @@ function parseCodexSessionFile(sessionFile) {
       }
 
       if (entry.type !== 'response_item' || !entry.payload) continue;
+
+      // MCP function_call extraction
+      if (entry.payload.type === 'function_call') {
+        const name = entry.payload.name || '';
+        if (name.startsWith('mcp__')) {
+          const parts = name.split('__');
+          if (parts.length >= 3) mcpSet.add(parts[1]);
+        }
+        continue;
+      }
+
       const role = entry.payload.role;
       if (role !== 'user' && role !== 'assistant') continue;
 
@@ -682,6 +802,7 @@ function parseCodexSessionFile(sessionFile) {
     firstTs,
     lastTs,
     fileSize: stat.size,
+    mcpServers: Array.from(mcpSet),
   };
 }
 
@@ -758,6 +879,9 @@ function scanCodexSessions() {
           }
           existing.first_ts = Math.min(existing.first_ts, summary.firstTs);
           existing.last_ts = Math.max(existing.last_ts, summary.lastTs);
+          if (summary.mcpServers && summary.mcpServers.length > 0) {
+            existing.mcp_servers = summary.mcpServers;
+          }
         } else {
           sessions.push({
             id: sid,
@@ -771,6 +895,8 @@ function scanCodexSessions() {
             has_detail: true,
             file_size: summary.fileSize,
             detail_messages: summary.msgCount,
+            mcp_servers: summary.mcpServers || [],
+            skills: [],
           });
         }
       }
@@ -1030,6 +1156,8 @@ function loadSessions() {
       s.has_detail = false;
       s.file_size = 0;
       s.detail_messages = 0;
+      s.mcp_servers = [];
+      s.skills = [];
     }
   }
 
@@ -1062,6 +1190,8 @@ function loadSessions() {
             has_detail: true,
             file_size: summary.fileSize,
             detail_messages: summary.msgCount,
+            mcp_servers: summary.mcpServers,
+            skills: summary.skills,
             _claude_dir: CLAUDE_DIR,
             _session_file: filePath,
             worktree_original_cwd: summary.worktreeOriginalCwd || '',
@@ -1069,6 +1199,12 @@ function loadSessions() {
         }
       }
     } catch {}
+  }
+
+  // Ensure all sessions have mcp_servers/skills (defaults for non-Claude)
+  for (const s of Object.values(sessions)) {
+    if (!s.mcp_servers) s.mcp_servers = [];
+    if (!s.skills) s.skills = [];
   }
 
   const result = Object.values(sessions).sort((a, b) => b.last_ts - a.last_ts);
@@ -1121,11 +1257,21 @@ function loadSessionDetail(sessionId, project) {
         if (entry.type === 'user' || entry.type === 'assistant') {
           const content = extractContent((entry.message || {}).content);
           if (content) {
-            messages.push({ role: entry.type, content: content.slice(0, 2000), uuid: entry.uuid || '' });
+            const msg = { role: entry.type, content: content.slice(0, 2000), uuid: entry.uuid || '' };
+            if (entry.type === 'assistant') {
+              const rawContent = (entry.message || {}).content;
+              if (Array.isArray(rawContent)) {
+                const tools = extractTools(rawContent);
+                if (tools.length > 0) msg.tools = tools;
+              }
+            }
+            messages.push(msg);
           }
         }
       } else {
+        // Codex format: response_item with payload
         if (entry.type === 'response_item' && entry.payload) {
+          const pType = entry.payload.type;
           const role = entry.payload.role;
           if (role === 'user' || role === 'assistant') {
             const content = extractContent(entry.payload.content);
@@ -1133,9 +1279,34 @@ function loadSessionDetail(sessionId, project) {
               messages.push({ role: role, content: content.slice(0, 2000), uuid: '' });
             }
           }
+          // Codex function_call → attach as tool to last assistant message
+          if (pType === 'function_call') {
+            const name = entry.payload.name || '';
+            if (name.startsWith('mcp__')) {
+              const parts = name.split('__');
+              if (parts.length >= 3) {
+                const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+                if (lastMsg && lastMsg.role === 'assistant') {
+                  if (!lastMsg.tools) lastMsg.tools = [];
+                  if (!lastMsg._toolSeen) lastMsg._toolSeen = new Set();
+                  const tool = parts.slice(2).join('__');
+                  const key = 'mcp:' + parts[1] + ':' + tool;
+                  if (!lastMsg._toolSeen.has(key)) {
+                    lastMsg._toolSeen.add(key);
+                    lastMsg.tools.push({ type: 'mcp', server: parts[1], tool: tool });
+                  }
+                }
+              }
+            }
+          }
         }
       }
     } catch {}
+  }
+
+  // Clean up internal markers from Codex
+  for (const m of messages) {
+    if (m._toolSeen) delete m._toolSeen;
   }
 
   return { messages: messages.slice(0, 200) };
@@ -1361,6 +1532,41 @@ function extractContent(raw) {
       .join('\n');
   }
   return String(raw);
+}
+
+// Extract MCP/Skill tool_use blocks from a Claude assistant message content array.
+// Returns deduplicated array of { type, server, tool } or { type, skill }.
+function extractTools(contentBlocks) {
+  if (!Array.isArray(contentBlocks)) return [];
+  const tools = [];
+  const seen = new Set();
+  for (const block of contentBlocks) {
+    if (!block || block.type !== 'tool_use') continue;
+    const name = block.name || '';
+    if (name.startsWith('mcp__')) {
+      const parts = name.split('__');
+      if (parts.length >= 3) {
+        const tool = parts.slice(2).join('__');
+        const key = 'mcp:' + parts[1] + ':' + tool;
+        if (!seen.has(key)) {
+          seen.add(key);
+          tools.push({ type: 'mcp', server: parts[1], tool: tool });
+        }
+      }
+    } else if (name === 'Skill') {
+      const skillRaw = (block.input || {}).skill;
+      if (skillRaw) {
+        // Use plugin name only (e.g. "superpowers:writing-plans" -> "superpowers")
+        const skill = skillRaw.includes(':') ? skillRaw.split(':')[0] : skillRaw;
+        const key = 'skill:' + skill;
+        if (!seen.has(key)) {
+          seen.add(key);
+          tools.push({ type: 'skill', skill: skill });
+        }
+      }
+    }
+  }
+  return tools;
 }
 
 function getSessionPreview(sessionId, project, limit) {
